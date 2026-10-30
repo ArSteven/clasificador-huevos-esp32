@@ -1,10 +1,29 @@
-# Sistema IoT clasificador de huevos por peso
+# Clasificador de huevos por peso con ESP32
 
-Proyecto de IoT – Unidades Tecnológicas de Santander (UTS).
+![ESP32](https://img.shields.io/badge/ESP32-Arduino-E7352C?logo=espressif&logoColor=white) ![PlatformIO](https://img.shields.io/badge/PlatformIO-build-F5822A?logo=platformio&logoColor=white) ![MQTT](https://img.shields.io/badge/MQTT-telemetría-660066?logo=mqtt&logoColor=white) ![Wokwi](https://img.shields.io/badge/Wokwi-simulación-2E7D32)
 
-Un ESP32 pesa cada huevo con una celda de carga + HX711, lo clasifica según su peso y, con dos servomotores, lo envía al compartimiento correspondiente. Cada huevo y las estadísticas de producción se publican por WiFi/MQTT para registrarlas en la nube.
+Un ESP32 pesa cada huevo con una celda de carga y un HX711, lo clasifica según la norma de pesos usada en Colombia y, con dos servomotores, lo envía al compartimiento que le corresponde. Cada huevo y el resumen de producción se publican por WiFi/MQTT.
 
-> **Fase actual:** montaje en ESP32 (simulado en Wokwi). La parte de nube/dashboard se agrega después.
+Proyecto de la asignatura de IoT, Unidades Tecnológicas de Santander (UTS).
+
+<!-- Foto del montaje: guardarla como docs/montaje.jpg y quitar el comentario de la línea siguiente.
+![Montaje físico del clasificador](docs/montaje.jpg)
+-->
+
+## Estado
+
+- **Hecho:** montaje en hardware real con la báscula calibrada, clasificación con dos servos, telemetría MQTT y simulación completa en Wokwi.
+- **Pendiente:** dashboard en la nube (EMQX en AWS) para ver la producción en tiempo real.
+
+## Decisiones técnicas
+
+- **El lazo principal no se bloquea.** Salvo la conexión inicial al WiFi (máximo 15 s al arrancar), todo se temporiza con `millis()`, sin `delay()`. Si el bróker MQTT se cae, el ESP32 reintenta cada 5 s sin dejar de clasificar huevos.
+- **Máquina de estados explícita** (`ESPERANDO → ESTABILIZANDO → POSICIONANDO → DESCARGANDO → VACIANDO`). Así es fácil razonar qué hace el sistema en cada momento y detectar un huevo atascado: si la báscula no se vacía en 3 s, publica una alerta.
+- **Peso estable antes de decidir:** se exigen 5 lecturas seguidas con menos de 1,5 g de diferencia y se promedian, para que el golpe del huevo al caer no lo clasifique mal.
+- **Tara automática** cada 15 s con la báscula vacía, para corregir el corrimiento del cero que tienen las celdas de carga reales.
+- **Last Will de MQTT** y mensajes retenidos: si el ESP32 se desconecta, el bróker publica `offline` por él, y quien se conecte después ve el último estado y el último resumen sin esperar.
+- **Simulación con el mismo código:** el comando `sim:<gramos>` inyecta un peso exacto, por el monitor serial o por MQTT, para probar todas las categorías sin huevos reales.
+- **Credenciales fuera del repositorio:** la red WiFi va en `include/secrets.h`, que está en `.gitignore`; sin ese archivo, el código usa la red del simulador.
 
 ## Cómo funciona
 
@@ -55,7 +74,7 @@ Bróker: `broker.hivemq.com:1883` (se cambia por la IP del EMQX en AWS en `confi
 | `uts/huevos/estado` | `online` / `offline` / alertas (retenido) | ESP32 (y el bróker por Last Will) | Dashboard | Al conectar / al caerse |
 | `uts/huevos/evento` | `{"id":7,"peso":62.3,"categoria":"AA","ts":1792081815}` | ESP32 | Nube / dashboard | Por cada huevo |
 | `uts/huevos/estadisticas` | total, promedio, mín, máx y conteo por categoría (retenido) | ESP32 | Nube / dashboard | Cada huevo y cada 10 s |
-| `uts/huevos/cmd` | `tara`, `reset`, `stats`, `sim:<g>` | Dashboard | ESP32 | Cuando el usuario lo envía |
+| `uts/huevos/cmd` | `tara`, `peso`, `reset`, `stats`, `sim:<g>` | Dashboard | ESP32 | Cuando el usuario lo envía |
 
 Para ver todo en MQTT Explorer suscríbete a `uts/huevos/#` (no a `#` solo, el bróker público lo rechaza).
 
@@ -93,6 +112,7 @@ Para ver todo en MQTT Explorer suscríbete a `uts/huevos/#` (no a `#` solo, el b
   stats       → muestra el resumen
   reset       → borra las estadísticas
   tara        → pone la báscula en cero
+  peso        → muestra la lectura actual (solo en el monitor serial)
   ```
 
 ## Montaje físico
@@ -110,3 +130,13 @@ Para ver todo en MQTT Explorer suscríbete a `uts/huevos/#` (no a `#` solo, el b
 - [PubSubClient](https://github.com/knolleary/pubsubclient) – cliente MQTT
 - [HX711](https://github.com/bogde/HX711) – celda de carga
 - [ESP32Servo](https://github.com/madhephaestus/ESP32Servo) – servomotores
+
+## Limitaciones conocidas
+
+- El bróker público (`broker.hivemq.com:1883`) no tiene cifrado ni autenticación: cualquiera que conozca el tópico podría enviar `reset` o `tara`. Para producción habría que usar TLS (puerto 8883) y usuario/contraseña en el EMQX propio.
+- Las estadísticas viven en la RAM del ESP32 y se pierden al reiniciarlo; la fuente de verdad debería ser la nube.
+
+## Equipo
+
+<!-- Completar con los integrantes del grupo -->
+- Elver Steven Ariza González · [github.com/ArSteven](https://github.com/ArSteven)
